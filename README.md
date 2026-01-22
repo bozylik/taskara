@@ -8,10 +8,10 @@ taskara is a simple and fast library for managing tasks in go. it allows you to 
 
 > [!IMPORTANT]
 > ## alpha-build
-> this is an early alpha version of the project. it does not include detailed instructions or many examples yet.
->
-> **status:** under active development.
-> **future:** we plan to add more features, better documentation, and complex examples soon.
+> this is an early alpha version of the project. it does not include detailed instructions or many examples yet.<br>
+> **status:** under active development.<br>
+>**future:** we plan to add more features, better documentation, and complex examples soon.<br>
+>we do not guarantee backward compatibility of various releases until the first stable version is available.
 
 ---
 
