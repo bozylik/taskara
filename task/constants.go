@@ -4,7 +4,8 @@ type TaskStatus int
 
 const (
 	StatusIdle TaskStatus = iota
-	StatusPending
+	StatusWaiting
+	StatusReady
 	StatusRunning
 	StatusCompleted
 	StatusCancelled

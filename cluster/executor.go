@@ -33,16 +33,17 @@ func (e *executor) runExecutor(ctx context.Context) {
 					return
 				}
 
-				workerCtx := ctx
+				workerCtx := taskItem.ctx
+				var cancel context.CancelFunc
 
 				if taskItem.timeout > 0 {
-					var cancel context.CancelFunc
-					workerCtx, cancel = context.WithTimeout(ctx, taskItem.timeout)
+					workerCtx, cancel = context.WithTimeout(taskItem.ctx, taskItem.timeout)
+				}
 
-					taskItem.Run(workerCtx, e.reporter)
+				taskItem.Run(workerCtx, e.reporter)
+
+				if cancel != nil {
 					cancel()
-				} else {
-					taskItem.Run(workerCtx, e.reporter)
 				}
 			}
 		}()

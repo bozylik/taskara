@@ -38,8 +38,8 @@ type clusterTask struct {
 	Index    int
 }
 
-func newClusterTask(t task.TaskInterface, st time.Time, to time.Duration, p int) *clusterTask {
-	ctx, cancel := context.WithCancel(context.Background())
+func newClusterTask(clusterCtx context.Context, t task.TaskInterface, st time.Time, to time.Duration, p int) *clusterTask {
+	ctx, cancel := context.WithCancel(clusterCtx)
 	return &clusterTask{
 		task:      t,
 		ctx:       ctx,
@@ -66,6 +66,8 @@ func (c *clusterTask) Cancel() {
 }
 
 func (c *clusterTask) Run(workerCtx context.Context, report task.Reporter) {
+	taskID := c.ID()
+
 	if c.ctx.Err() != nil {
 		c.finish(task.StatusCancelled, c.ctx.Err(), report, nil)
 		return
@@ -77,31 +79,39 @@ func (c *clusterTask) Run(workerCtx context.Context, report task.Reporter) {
 		if r := recover(); r != nil {
 			err := fmt.Errorf("task panicked: %v", r)
 			c.finish(task.StatusError, err, report, nil)
-		} else if c.Status() == task.StatusRunning {
-			if c.ctx.Err() != nil || workerCtx.Err() != nil {
-				c.finish(task.StatusCancelled, context.Cause(c.ctx), report, nil)
-			} else {
+		} else {
+			select {
+			case <-c.ctx.Done():
+				c.finish(task.StatusCancelled, c.ctx.Err(), report, nil)
+			case <-workerCtx.Done():
+				c.finish(task.StatusCancelled, workerCtx.Err(), report, nil)
+			default:
+				// Если всё чисто — завершено успешно
 				c.finish(task.StatusCompleted, nil, report, nil)
 			}
 		}
 	}()
 
 	taskLogic := c.task.Fn()
-	taskLogic(workerCtx, c.ctx.Done(), func(id string, val any, err error) {
-		status := task.StatusCompleted
+
+	taskLogic(taskID, workerCtx, c.ctx.Done(), func(id string, val any, err error) {
+		finalStatus := task.StatusCompleted
+		finalErr := err
+
 		select {
 		case <-c.ctx.Done():
-			status = task.StatusCancelled
-			err = c.ctx.Err()
+			finalStatus = task.StatusCancelled
+			finalErr = c.ctx.Err()
 		case <-workerCtx.Done():
-			status = task.StatusCancelled
-			err = workerCtx.Err()
+			finalStatus = task.StatusCancelled
+			finalErr = workerCtx.Err()
 		default:
 			if err != nil {
-				status = task.StatusError
+				finalStatus = task.StatusError
 			}
 		}
-		c.finish(status, err, report, val)
+
+		c.finish(finalStatus, finalErr, report, val)
 	})
 }
 

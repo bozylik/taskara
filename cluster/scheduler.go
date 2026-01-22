@@ -4,6 +4,7 @@ import (
 	"container/heap"
 	"context"
 	"github.com/bozylik/taskara/container"
+	"github.com/bozylik/taskara/task"
 	"sync"
 	"time"
 )
@@ -26,6 +27,8 @@ func newScheduler() *scheduler {
 }
 
 func (s *scheduler) submitInternal(ct *clusterTask) {
+	ct.status.Store(int32(task.StatusWaiting))
+
 	item := &container.Item{
 		Value:    ct,
 		Priority: ct.Priority,
@@ -60,11 +63,12 @@ func (s *scheduler) runScheduler(ctx context.Context) {
 		}
 
 		item := s.waitingQueue.Peek().(*container.Item)
-		task := item.Value.(*clusterTask)
+		ctask := item.Value.(*clusterTask)
 		now := time.Now()
 
-		if now.After(task.startTime) || now.Equal(task.startTime) {
+		if now.After(ctask.startTime) || now.Equal(ctask.startTime) {
 			heap.Pop(&s.waitingQueue)
+			ctask.status.Store(int32(task.StatusReady))
 			heap.Push(&s.readyQueue, item)
 			s.mu.Unlock()
 
@@ -75,7 +79,7 @@ func (s *scheduler) runScheduler(ctx context.Context) {
 			continue
 		}
 
-		wait := task.startTime.Sub(now)
+		wait := ctask.startTime.Sub(now)
 		timer.Reset(wait)
 		s.mu.Unlock()
 
@@ -93,7 +97,8 @@ func (s *scheduler) getNext(ctx context.Context) *clusterTask {
 		s.mu.Lock()
 		if s.readyQueue.Len() != 0 {
 			item := heap.Pop(&s.readyQueue).(*container.Item)
-			task := item.Value.(*clusterTask)
+			ctask := item.Value.(*clusterTask)
+			ctask.status.Store(int32(task.StatusRunning))
 
 			if s.readyQueue.Len() > 0 {
 				select {
@@ -103,7 +108,7 @@ func (s *scheduler) getNext(ctx context.Context) *clusterTask {
 			}
 
 			s.mu.Unlock()
-			return task
+			return ctask
 		}
 
 		s.mu.Unlock()

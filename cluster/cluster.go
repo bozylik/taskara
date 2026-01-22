@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/bozylik/taskara/task"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -25,6 +26,8 @@ type cluster struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	counter int64
 }
 
 func NewCluster(workers int, ctx context.Context) ClusterInterface {
@@ -40,9 +43,14 @@ func NewCluster(workers int, ctx context.Context) ClusterInterface {
 		cancel:      cancel,
 	}
 
-	c.exec = newExecutor(workers, c.SetResult)
+	c.exec = newExecutor(workers, c.setResult)
 
 	return c
+}
+
+func (c *cluster) generateNextID() string {
+	id := atomic.AddInt64(&c.counter, 1)
+	return fmt.Sprintf("task-%d", id)
 }
 
 func (c *cluster) Cancel() {
@@ -51,16 +59,20 @@ func (c *cluster) Cancel() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	for _, info := range c.subscribers {
+	for id, info := range c.subscribers {
+		cancelRes := Result{Err: c.ctx.Err()}
+
 		for _, ch := range info.waiters {
-			ch <- Result{Err: c.ctx.Err()}
+			ch <- cancelRes
 			close(ch)
 		}
-
 		info.waiters = nil
-		if info.err == nil {
-			info.err = c.ctx.Err()
+
+		if info.result == nil {
+			info.result = &cancelRes
 		}
+
+		delete(c.subscribers, id)
 	}
 }
 
@@ -112,15 +124,15 @@ func (c *cluster) Subscribe(id string) (<-chan Result, error) {
 
 	info, ok := c.subscribers[id]
 
-	if ok && (info.result != nil || info.err != nil) {
-		return nil, fmt.Errorf("task %s already finished, result is no longer available", id)
+	if ok && info.result != nil {
+		ch := make(chan Result, 1)
+		ch <- *info.result
+		close(ch)
+		return ch, nil
 	}
 
 	if !ok {
-		info = &SubscribeInfo{
-			waiters: make([]chan Result, 0),
-		}
-		c.subscribers[id] = info
+		return nil, fmt.Errorf("task %s not found: it was never submitted or cache expired", id)
 	}
 
 	ch := make(chan Result, 1)
@@ -130,22 +142,36 @@ func (c *cluster) Subscribe(id string) (<-chan Result, error) {
 	return ch, nil
 }
 
-func (c *cluster) SetResult(id string, val any, err error) {
+func (c *cluster) setResult(id string, val any, err error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	info, ok := c.subscribers[id]
 	if !ok {
+		c.mu.Unlock()
 		return
 	}
 
 	res := Result{Result: val, Err: err}
+	info.result = &res
+
 	for _, ch := range info.waiters {
 		ch <- res
 		close(ch)
 	}
+	info.waiters = nil
+	c.mu.Unlock()
 
-	delete(c.subscribers, id)
+	if info.isCacheable {
+		time.AfterFunc(5*time.Minute, func() {
+			c.mu.Lock()
+			delete(c.subscribers, id)
+			c.mu.Unlock()
+			fmt.Printf("Cache for task %s cleared\n", id)
+		})
+	} else {
+		c.mu.Lock()
+		delete(c.subscribers, id)
+		c.mu.Unlock()
+	}
 }
 
 func (c *cluster) CancelTask(id string) {
