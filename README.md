@@ -88,7 +88,7 @@ import (
 
 >**part 2: task and TaskInterface**<br>
 
-A Task is a base struct used within clusters. It contains a unique ID and the function to be executed.
+A Task is a base struct used within clusters. It contains a unique ID and the function to be executed.<br>
 **task** - struct with `id string` and `fn TaskFunc` fields.<br>
 **TaskInterface** - interface that provides encapsulation for task methods.<br>
 ```go
@@ -101,7 +101,7 @@ task1 := task.NewTask("task-1", job1)
 
 >**part 3: cluster and ClusterInterface**<br>
 
-The Cluster manages task execution. It contains all necessary methods for running, cancelling tasks, and the cluster itself.
+The Cluster manages task execution. It contains all necessary methods for running, cancelling tasks, and the cluster itself.<br>
 **cluster** - struct that contains executor, scheduler, and state.<br>
 **ClusterInterface** - interface that provides encapsulation for cluster methods.<br>
 ```go
@@ -122,7 +122,7 @@ myCluster.Run()
 >**part 4: clusterTask and clusterTaskBuilder**<br>
 
 **clusterTask** - is an internal task struct that represents a task within the cluster's lifecycle.<br>
-**clusterTaskBuilder** - is a helper that allows you to use chaining while adding a new task.
+**clusterTaskBuilder** - is a helper that allows you to use chaining while adding a new task.<br>
 ```go
 // Add task to the cluster with optional parameters
 clusterTaskID, err := myCluster.AddTask(task1).
