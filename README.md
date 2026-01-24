@@ -91,7 +91,6 @@ import (
 A Task is a base struct used within clusters. It contains a unique ID and the function to be executed.
 **task** - struct with `id string` and `fn TaskFunc` fields.<br>
 **TaskInterface** - interface that provides encapsulation for task methods.<br>
-Task
 ```go
 // func NewTask(id string, fn TaskFunc) TaskInterface
 // The task ID will be set automatically by the cluster if you leave it empty
