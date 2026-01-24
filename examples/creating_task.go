@@ -65,8 +65,9 @@ func main() {
 	}
 
 	// You can cancel task or full cluster
-	//myCluster.CancelTask(clusterTaskID)
-	//myCluster.Cancel()
+	// myCluster.CancelTask(clusterTaskID)
+	// myCluster.Cancel()
+	// myCluster.Stop(timeout time.Duration)
 
 	fmt.Println("Results from task-1:", <-resChan)
 }
