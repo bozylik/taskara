@@ -161,11 +161,10 @@ func (c *cluster) setResult(id string, val any, err error) {
 	c.mu.Unlock()
 
 	if info.isCacheable {
-		time.AfterFunc(5*time.Minute, func() {
+		time.AfterFunc(30*time.Second, func() {
 			c.mu.Lock()
 			delete(c.subscribers, id)
 			c.mu.Unlock()
-			fmt.Printf("Cache for task %s cleared\n", id)
 		})
 	} else {
 		c.mu.Lock()

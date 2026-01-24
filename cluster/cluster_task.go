@@ -86,7 +86,6 @@ func (c *clusterTask) Run(workerCtx context.Context, report task.Reporter) {
 			case <-workerCtx.Done():
 				c.finish(task.StatusCancelled, workerCtx.Err(), report, nil)
 			default:
-				// Если всё чисто — завершено успешно
 				c.finish(task.StatusCompleted, nil, report, nil)
 			}
 		}
@@ -102,9 +101,11 @@ func (c *clusterTask) Run(workerCtx context.Context, report task.Reporter) {
 		case <-c.ctx.Done():
 			finalStatus = task.StatusCancelled
 			finalErr = c.ctx.Err()
+			val = nil
 		case <-workerCtx.Done():
 			finalStatus = task.StatusCancelled
 			finalErr = workerCtx.Err()
+			val = nil
 		default:
 			if err != nil {
 				finalStatus = task.StatusError
@@ -123,6 +124,7 @@ func (c *clusterTask) finish(status task.TaskStatus, err error, report task.Repo
 		if report != nil {
 			report(c.ID(), val, err)
 		}
+
 		close(c.done)
 	})
 }
