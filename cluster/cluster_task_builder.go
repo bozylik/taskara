@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"fmt"
 	"github.com/bozylik/taskara/task"
 	"time"
 )
@@ -11,6 +12,8 @@ type clusterTaskBuilder struct {
 
 	startTime time.Time
 	timeout   time.Duration
+
+	isCacheable bool
 
 	priority int
 	index    int
@@ -31,19 +34,40 @@ func (c *clusterTaskBuilder) WithPriority(p int) *clusterTaskBuilder {
 	return c
 }
 
-func (c *clusterTaskBuilder) Submit() ClusterInterface {
-	ct := newClusterTask(c.it, c.startTime, c.timeout, c.priority)
+func (c *clusterTaskBuilder) IsCacheable(v bool) *clusterTaskBuilder {
+	c.isCacheable = v
+	return c
+}
 
+func (c *clusterTaskBuilder) Submit() (string, error) {
 	c.cluster.mu.Lock()
-	info, ok := c.cluster.subscribers[ct.ID()]
+	defer c.cluster.mu.Unlock()
+
+	id := c.it.ID()
+
+	if id == "" {
+		id = c.cluster.generateNextID()
+		c.it.SetID(id)
+	}
+
+	if info, exists := c.cluster.subscribers[id]; exists && info.ct != nil {
+		return "", fmt.Errorf("task with id %s is already running", id)
+	}
+
+	ct := newClusterTask(c.cluster.ctx, c.it, c.startTime, c.timeout, c.priority)
+
+	info, ok := c.cluster.subscribers[id]
 	if !ok {
 		info = &SubscribeInfo{waiters: make([]chan Result, 0)}
-		c.cluster.subscribers[ct.ID()] = info
+		c.cluster.subscribers[id] = info
 	}
 
 	info.ct = ct
-	c.cluster.mu.Unlock()
+	info.isCacheable = c.isCacheable
+
+	info.result = nil
 
 	c.cluster.exec.sch.submitInternal(ct)
-	return c.cluster
+
+	return id, nil
 }
