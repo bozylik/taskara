@@ -161,7 +161,7 @@ func (c *cluster) setResult(id string, val any, err error) {
 	c.mu.Unlock()
 
 	if info.isCacheable {
-		time.AfterFunc(30*time.Second, func() {
+		time.AfterFunc(5*time.Minute, func() {
 			c.mu.Lock()
 			delete(c.subscribers, id)
 			c.mu.Unlock()

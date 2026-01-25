@@ -14,13 +14,6 @@ type Result struct {
 	Err    error
 }
 
-type InternalTaskInterface interface {
-	ID() string
-	Run(ctx context.Context, report task.Reporter)
-	Status() task.TaskStatus
-	Cancel()
-}
-
 type clusterTask struct {
 	task   task.TaskInterface
 	status atomic.Int32
