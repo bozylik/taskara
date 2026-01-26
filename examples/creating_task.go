@@ -39,9 +39,9 @@ func main() {
 		report(id, "Data from task-1", nil)
 	}
 
-	// The task ID will be set automatically by the cluster if you leave it empty
+	// The task getID will be set automatically by the cluster if you leave it empty
 	task1 := task.NewTask("", job1)
-	// Adding task to cluster and getting cluster task ID
+	// Adding task to cluster and getting cluster task getID
 	// Using chaining for adding cluster task parameters
 	clusterTaskID, err := myCluster.AddTask(task1).
 		WithStartTime(time.Now().Add(5 * time.Second)).
@@ -66,7 +66,7 @@ func main() {
 
 	// You can cancel task or full cluster
 	// myCluster.CancelTask(clusterTaskID)
-	// myCluster.Cancel()
+	// myCluster.cancelClusterTask()
 	// myCluster.Stop(timeout time.Duration)
 
 	fmt.Println("Results from task-1:", <-resChan)

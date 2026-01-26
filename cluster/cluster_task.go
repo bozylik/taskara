@@ -9,9 +9,12 @@ import (
 	"time"
 )
 
+// Result is what you get from the subscription channel.
 type Result struct {
+	// Data from the task.
 	Result any
-	Err    error
+	// Error from the task, timeout, or panic.
+	Err error
 }
 
 type clusterTask struct {
@@ -44,22 +47,22 @@ func newClusterTask(clusterCtx context.Context, t task.TaskInterface, st time.Ti
 	}
 }
 
-func (c *clusterTask) ID() string {
+func (c *clusterTask) getID() string {
 	return c.task.ID()
 }
 
-func (c *clusterTask) Status() task.TaskStatus {
+func (c *clusterTask) getStatus() task.TaskStatus {
 	return task.TaskStatus(c.status.Load())
 }
 
-func (c *clusterTask) Cancel() {
-	if c.Status() < task.StatusCompleted {
+func (c *clusterTask) cancelClusterTask() {
+	if c.getStatus() < task.StatusCompleted {
 		c.cancel()
 	}
 }
 
-func (c *clusterTask) Run(workerCtx context.Context, report task.Reporter) {
-	taskID := c.ID()
+func (c *clusterTask) runClusterTask(workerCtx context.Context, report task.Reporter) {
+	taskID := c.getID()
 
 	if c.ctx.Err() != nil {
 		c.finish(task.StatusCancelled, c.ctx.Err(), report, nil)
@@ -115,7 +118,7 @@ func (c *clusterTask) finish(status task.TaskStatus, err error, report task.Repo
 		c.cancel()
 
 		if report != nil {
-			report(c.ID(), val, err)
+			report(c.getID(), val, err)
 		}
 
 		close(c.done)

@@ -40,7 +40,7 @@ func (e *executor) runExecutor(ctx context.Context) {
 					workerCtx, cancel = context.WithTimeout(taskItem.ctx, taskItem.timeout)
 				}
 
-				taskItem.Run(workerCtx, e.reporter)
+				taskItem.runClusterTask(workerCtx, e.reporter)
 
 				if cancel != nil {
 					cancel()

@@ -1,6 +1,6 @@
 package cluster
 
-type SubscribeInfo struct {
+type subscribeInfo struct {
 	waiters     []chan Result
 	subs        int
 	result      *Result
