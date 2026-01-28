@@ -27,6 +27,9 @@ type clusterTask struct {
 	done chan struct{}
 	once sync.Once
 
+	onCompleteFn func(id string, val any, err error)
+	onFailureFn  func(id string, err error)
+
 	startTime time.Time
 	timeout   time.Duration
 
@@ -116,6 +119,14 @@ func (c *clusterTask) finish(status task.TaskStatus, err error, report task.Repo
 	c.once.Do(func() {
 		c.status.Store(int32(status))
 		c.cancel()
+
+		if err != nil && c.onFailureFn != nil {
+			c.onFailureFn(c.getID(), err)
+		}
+
+		if c.onCompleteFn != nil {
+			c.onCompleteFn(c.getID(), val, err)
+		}
 
 		if report != nil {
 			report(c.getID(), val, err)

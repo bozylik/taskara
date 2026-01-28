@@ -6,6 +6,38 @@ import (
 	"time"
 )
 
+// ClusterTaskBuilderInterface provides a fluent API for configuring and submitting a task to the cluster.
+// It allows setting execution parameters such as start time, timeout, priority, and lifecycle callbacks.
+// The configuration must be finalized by calling the Submit method.
+type ClusterTaskBuilderInterface interface {
+	// WithStartTime schedules the task to run at a specific time.
+	// If the time is in the past or time.Now(), the task will be executed as soon as a worker is available.
+	WithStartTime(st time.Time) ClusterTaskBuilderInterface
+	// WithTimeout sets a maximum execution time for the task.
+	// If the task exceeds this duration, its ctx will be cancelled, and the task will be marked as timed out.
+	WithTimeout(tm time.Duration) ClusterTaskBuilderInterface
+	// WithPriority sets the task's priority.
+	// Higher values (or lower, depending on your heap logic—usually higher) will move the task to the front of the queue.
+	WithPriority(p int) ClusterTaskBuilderInterface
+	// IsCacheable determines if the task result should be stored in memory after completion.
+	// Currently, cached results are stored for 5 minutes after the task completes.
+	// After this period, the result is purged from memory to prevent leaks.
+	// (Note: This duration may become configurable in future releases).
+	IsCacheable(v bool) ClusterTaskBuilderInterface
+	// OnComplete registers a callback that will be invoked once the task finishes its execution,
+	// regardless of whether it succeeded, failed, or was cancelled.
+	// The callback receives the task's unique ID, the resulting value, and any error encountered.
+	OnComplete(fn func(id string, val any, err error)) ClusterTaskBuilderInterface
+	// OnFailure registers a callback that will be invoked only if the task ends with an error,
+	// a panic, or is cancelled.
+	// The callback receives the task's unique ID and the error that caused the failure.
+	OnFailure(fn func(id string, err error)) ClusterTaskBuilderInterface
+	// Submit - the final method in the chain.
+	// It validates the task, generates an ID (if empty), and pushes the task into the scheduler.
+	// Returns an error if a task with the same ID is already running or managed by the cluster.
+	Submit() (string, error)
+}
+
 type clusterTaskBuilder struct {
 	it      task.TaskInterface
 	cluster *cluster
@@ -13,71 +45,75 @@ type clusterTaskBuilder struct {
 	startTime time.Time
 	timeout   time.Duration
 
+	onCompleteFn func(id string, val any, err error)
+	onFailureFn  func(id string, err error)
+
 	isCacheable bool
 
 	priority int
 	index    int
 }
 
-// Schedules the task to run at a specific time.
-// If the time is in the past or time.Now(), the task will be executed as soon as a worker is available.
-func (c *clusterTaskBuilder) WithStartTime(st time.Time) *clusterTaskBuilder {
+func (c *clusterTaskBuilder) WithStartTime(st time.Time) ClusterTaskBuilderInterface {
 	c.startTime = st
 	return c
 }
 
-// Sets a maximum execution time for the task.
-// If the task exceeds this duration, its ctx will be cancelled, and the task will be marked as timed out.
-func (c *clusterTaskBuilder) WithTimeout(tm time.Duration) *clusterTaskBuilder {
+func (c *clusterTaskBuilder) WithTimeout(tm time.Duration) ClusterTaskBuilderInterface {
 	c.timeout = tm
 	return c
 }
 
-// Sets the task's priority.
-// Higher values (or lower, depending on your heap logic—usually higher) will move the task to the front of the queue.
-func (c *clusterTaskBuilder) WithPriority(p int) *clusterTaskBuilder {
+func (c *clusterTaskBuilder) WithPriority(p int) ClusterTaskBuilderInterface {
 	c.priority = p
 	return c
 }
 
-// Determines if the task result should be stored in memory after completion.
-// Currently, cached results are stored for 5 minutes after the task completes.
-// After this period, the result is purged from memory to prevent leaks.
-// (Note: This duration may become configurable in future releases).
-func (c *clusterTaskBuilder) IsCacheable(v bool) *clusterTaskBuilder {
+func (c *clusterTaskBuilder) IsCacheable(v bool) ClusterTaskBuilderInterface {
 	c.isCacheable = v
 	return c
 }
 
-// The final method in the chain.
-// It validates the task, generates an ID (if empty), and pushes the task into the scheduler.
-// Returns an error if a task with the same ID is already running or managed by the cluster.
+func (c *clusterTaskBuilder) OnComplete(fn func(id string, val any, err error)) ClusterTaskBuilderInterface {
+	c.onCompleteFn = fn
+	return c
+}
+
+func (c *clusterTaskBuilder) OnFailure(fn func(id string, err error)) ClusterTaskBuilderInterface {
+	c.onFailureFn = fn
+	return c
+}
+
 func (c *clusterTaskBuilder) Submit() (string, error) {
 	c.cluster.mu.Lock()
 	defer c.cluster.mu.Unlock()
 
 	id := c.it.ID()
-
 	if id == "" {
 		id = c.cluster.generateNextID()
 		c.it.SetID(id)
 	}
 
-	if info, exists := c.cluster.subscribers[id]; exists && info.ct != nil {
-		return "", fmt.Errorf("task with id %s is already running", id)
+	info, exists := c.cluster.subscribers[id]
+
+	if exists {
+		if info.ct != nil {
+			return "", fmt.Errorf("task with id %s is already running", id)
+		}
+		info.result = nil
 	}
 
 	ct := newClusterTask(c.cluster.ctx, c.it, c.startTime, c.timeout, c.priority)
+	ct.onCompleteFn = c.onCompleteFn
+	ct.onFailureFn = c.onFailureFn
 
-	info, ok := c.cluster.subscribers[id]
-	if !ok {
+	if !exists {
 		info = &subscribeInfo{waiters: make([]chan Result, 0)}
 		c.cluster.subscribers[id] = info
 	}
 
 	info.ct = ct
 	info.isCacheable = c.isCacheable
-
 	info.result = nil
 
 	c.cluster.exec.sch.submitInternal(ct)

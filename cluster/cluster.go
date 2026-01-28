@@ -11,11 +11,21 @@ import (
 
 // ClusterInterface - interface that provides encapsulation for cluster methods.
 type ClusterInterface interface {
+	// Run starts the cluster's execution engine. Workers begin listening to the queue and processing tasks.
 	Run()
+	// Stop - graceful shutdown. The cluster stops accepting new tasks and waits for active workers to finish.
+	// If the timeout is reached before tasks finish, it returns an error.
 	Stop(timeout time.Duration) error
-	AddTask(t task.TaskInterface) *clusterTaskBuilder
+	// AddTask - the entry point for submitting a task. It returns a builder that allows you to configure scheduling, timeouts, and metadata.
+	// You must call .Submit() at the end of the chain to queue the task.
+	AddTask(t task.TaskInterface) ClusterTaskBuilderInterface
+	// Subscribe returns a channel that receives the task's result (val and err).
 	Subscribe(id string) (<-chan Result, error)
+	// Cancel - immediate shutdown. Instantly kills all workers and cancels all active task contexts.
+	// Use this only when a graceful shutdown is not possible, as it may leave tasks in an incomplete state.
 	Cancel()
+	// CancelTask targets and cancels a specific task by its ID.
+	// This triggers the cancelled channel inside the TaskFunc and closes the task's context.
 	CancelTask(id string)
 }
 
@@ -55,8 +65,6 @@ func (c *cluster) generateNextID() string {
 	return fmt.Sprintf("task-%d", id)
 }
 
-// Cancel - immediate shutdown. Instantly kills all workers and cancels all active task contexts.
-// Use this only when a graceful shutdown is not possible, as it may leave tasks in an incomplete state.
 func (c *cluster) Cancel() {
 	c.cancel()
 
@@ -84,8 +92,6 @@ func (e *executor) wait() {
 	e.wg.Wait()
 }
 
-// Stop - graceful shutdown. The cluster stops accepting new tasks and waits for active workers to finish.
-// If the timeout is reached before tasks finish, it returns an error.
 func (c *cluster) Stop(timeout time.Duration) error {
 	c.cancel()
 
@@ -103,9 +109,7 @@ func (c *cluster) Stop(timeout time.Duration) error {
 	}
 }
 
-// AddTask - the entry point for submitting a task. It returns a builder that allows you to configure scheduling, timeouts, and metadata.
-// You must call .Submit() at the end of the chain to queue the task.
-func (c *cluster) AddTask(t task.TaskInterface) *clusterTaskBuilder {
+func (c *cluster) AddTask(t task.TaskInterface) ClusterTaskBuilderInterface {
 	if t == nil {
 		panic("task cannot be nil")
 	}
@@ -116,12 +120,10 @@ func (c *cluster) AddTask(t task.TaskInterface) *clusterTaskBuilder {
 	}
 }
 
-// Run starts the cluster's execution engine. Workers begin listening to the queue and processing tasks.
 func (c *cluster) Run() {
 	c.exec.runExecutor(c.ctx)
 }
 
-// Subscribe returns a channel that receives the task's result (val and err).
 func (c *cluster) Subscribe(id string) (<-chan Result, error) {
 	select {
 	case <-c.ctx.Done():
@@ -183,8 +185,6 @@ func (c *cluster) setResult(id string, val any, err error) {
 	}
 }
 
-// CancelTask targets and cancels a specific task by its ID.
-// This triggers the cancelled channel inside the TaskFunc and closes the task's context.
 func (c *cluster) CancelTask(id string) {
 	c.mu.Lock()
 	info, ok := c.subscribers[id]

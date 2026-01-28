@@ -9,8 +9,13 @@ type Reporter func(id string, val any, err error)
 
 // TaskInterface defines the behavior of a task that can be managed by the cluster.
 type TaskInterface interface {
+	// ID returns the task's unique identifier.
 	ID() string
+	// SetID Updates the task ID manually.
+	// Do not call SetID after the task has been added to a cluster.
+	// Doing so will break the internal mapping and the task may become unmanageable.
 	SetID(id string)
+	// Fn returns the underlying function to be executed.
 	Fn() TaskFunc
 }
 
@@ -36,19 +41,14 @@ func NewTask(id string, fn TaskFunc) TaskInterface {
 	}
 }
 
-// ID returns the task's unique identifier.
 func (t *task) ID() string {
 	return t.id
 }
 
-// SetID Updates the task ID manually.
-// Do not call SetID after the task has been added to a cluster.
-// Doing so will break the internal mapping and the task may become unmanageable.
 func (t *task) SetID(id string) {
 	t.id = id
 }
 
-// Fn returns the underlying function to be executed.
 func (t *task) Fn() TaskFunc {
 	return t.fn
 }
