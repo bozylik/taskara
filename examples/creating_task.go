@@ -13,7 +13,7 @@ func main() {
 	// Cluster context
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
+	
 	// Creating cluster
 	myCluster := cluster.NewCluster(2, ctx)
 	// You can run cluster now or later
@@ -22,7 +22,7 @@ func main() {
 	// Task function definition
 	job1 := func(id string, ctx context.Context, cancelled <-chan struct{}, report task.Reporter) {
 
-		/*select {
+		select {
 		// Manual task cancellation (cluster.CancelTask())
 		case <-cancelled:
 			return
@@ -33,7 +33,7 @@ func main() {
 			return
 		case <-time.After(4 * time.Second):
 			fmt.Printf("[%s] Working job1...\n", id)
-		}*/
+		}
 
 		// You should call report at the end of the function; if you forget to do it, it will be automatically set to nil.
 		report(id, "Data from task-1", nil)

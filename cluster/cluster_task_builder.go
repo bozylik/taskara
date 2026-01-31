@@ -19,6 +19,13 @@ type ClusterTaskBuilderInterface interface {
 	// WithPriority sets the task's priority.
 	// Higher values (or lower, depending on your heap logic—usually higher) will move the task to the front of the queue.
 	WithPriority(p int) ClusterTaskBuilderInterface
+
+	WithRetry(r int) ClusterTaskBuilderInterface
+	WithBackoffStrategy(strategy RetryBackoffStrategy) ClusterTaskBuilderInterface
+	WithJitter() ClusterTaskBuilderInterface
+	RetryIf(func(err error) bool) ClusterTaskBuilderInterface
+	WithRetryMode(mode RetryMode) ClusterTaskBuilderInterface
+
 	// IsCacheable determines if the task result should be stored in memory after completion.
 	// Currently, cached results are stored for 5 minutes after the task completes.
 	// After this period, the result is purged from memory to prevent leaks.
@@ -50,6 +57,12 @@ type clusterTaskBuilder struct {
 
 	isCacheable bool
 
+	maxRetries   int
+	retryBackoff RetryBackoffStrategy
+	jitter       bool
+	retryIf      func(err error) bool
+	retryMode    RetryMode
+
 	priority int
 	index    int
 }
@@ -66,6 +79,31 @@ func (c *clusterTaskBuilder) WithTimeout(tm time.Duration) ClusterTaskBuilderInt
 
 func (c *clusterTaskBuilder) WithPriority(p int) ClusterTaskBuilderInterface {
 	c.priority = p
+	return c
+}
+
+func (c *clusterTaskBuilder) WithRetry(retries int) ClusterTaskBuilderInterface {
+	c.maxRetries = retries
+	return c
+}
+
+func (c *clusterTaskBuilder) WithBackoffStrategy(strategy RetryBackoffStrategy) ClusterTaskBuilderInterface {
+	c.retryBackoff = strategy
+	return c
+}
+
+func (c *clusterTaskBuilder) WithJitter() ClusterTaskBuilderInterface {
+	c.jitter = true
+	return c
+}
+
+func (c *clusterTaskBuilder) RetryIf(fn func(err error) bool) ClusterTaskBuilderInterface {
+	c.retryIf = fn
+	return c
+}
+
+func (c *clusterTaskBuilder) WithRetryMode(mode RetryMode) ClusterTaskBuilderInterface {
+	c.retryMode = mode
 	return c
 }
 
@@ -106,6 +144,13 @@ func (c *clusterTaskBuilder) Submit() (string, error) {
 	ct := newClusterTask(c.cluster.ctx, c.it, c.startTime, c.timeout, c.priority)
 	ct.onCompleteFn = c.onCompleteFn
 	ct.onFailureFn = c.onFailureFn
+
+	ct.maxRetries = c.maxRetries
+	ct.retryBackoff = c.retryBackoff
+	ct.jitter = c.jitter
+	ct.retryIf = c.retryIf
+	ct.retryMode = c.retryMode
+	ct.cluster = c.cluster
 
 	if !exists {
 		info = &subscribeInfo{waiters: make([]chan Result, 0)}

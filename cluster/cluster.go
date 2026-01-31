@@ -115,8 +115,10 @@ func (c *cluster) AddTask(t task.TaskInterface) ClusterTaskBuilderInterface {
 	}
 
 	return &clusterTaskBuilder{
-		it:      t,
-		cluster: c,
+		it:           t,
+		cluster:      c,
+		retryMode:    Requeue,
+		retryBackoff: FixedBackoff{Delay: 1 * time.Second},
 	}
 }
 
@@ -162,6 +164,16 @@ func (c *cluster) setResult(id string, val any, err error) {
 		return
 	}
 
+	if err != nil && info.ct.retryMode == Requeue && info.ct.shouldRetry(err) {
+		delay := info.ct.calculateNextDelay()
+		info.ct.prepareForRetry()
+		info.ct.startTime = time.Now().Add(delay)
+		c.exec.sch.submitInternal(info.ct)
+
+		c.mu.Unlock()
+		return
+	}
+
 	res := Result{Result: val, Err: err}
 	info.result = &res
 
@@ -170,16 +182,20 @@ func (c *cluster) setResult(id string, val any, err error) {
 		close(ch)
 	}
 	info.waiters = nil
-	c.mu.Unlock()
+
+	info.ct = nil
 
 	if info.isCacheable {
+		oldInfo := info
 		time.AfterFunc(5*time.Minute, func() {
 			c.mu.Lock()
-			delete(c.subscribers, id)
-			c.mu.Unlock()
+			defer c.mu.Unlock()
+			if cur, exists := c.subscribers[id]; exists && cur == oldInfo {
+				delete(c.subscribers, id)
+			}
 		})
+		c.mu.Unlock()
 	} else {
-		c.mu.Lock()
 		delete(c.subscribers, id)
 		c.mu.Unlock()
 	}
