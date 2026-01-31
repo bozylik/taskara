@@ -36,21 +36,17 @@ type clusterTask struct {
 	startTime time.Time
 	timeout   time.Duration
 
-	maxRetries     int
-	retryBackoff   RetryBackoffStrategy
-	jitter         bool
-	retryIf        func(err error) bool
-	retryMode      RetryMode
-	currentAttempt int
+	retryCfg retryConfig
 
 	Priority int
 	Index    int
 }
 
-func newClusterTask(clusterCtx context.Context, t task.TaskInterface, st time.Time, to time.Duration, p int) *clusterTask {
-	ctx, cancel := context.WithCancel(clusterCtx)
+func newClusterTask(c *cluster, t task.TaskInterface, st time.Time, to time.Duration, p int) *clusterTask {
+	ctx, cancel := context.WithCancel(c.ctx)
 	return &clusterTask{
 		task:      t,
+		cluster:   c,
 		ctx:       ctx,
 		cancel:    cancel,
 		done:      make(chan struct{}),
@@ -75,7 +71,7 @@ func (c *clusterTask) cancelClusterTask() {
 }
 
 func (c *clusterTask) shouldRetry(err error) bool {
-	if c.maxRetries <= 0 || c.currentAttempt >= c.maxRetries {
+	if c.retryCfg.maxRetries <= 0 || c.retryCfg.currentAttempt >= c.retryCfg.maxRetries {
 		return false
 	}
 
@@ -83,20 +79,20 @@ func (c *clusterTask) shouldRetry(err error) bool {
 		return false
 	}
 
-	if c.retryIf != nil {
-		return c.retryIf(err)
+	if c.retryCfg.retryIf != nil {
+		return c.retryCfg.retryIf(err)
 	}
 
 	return true
 }
 
 func (c *clusterTask) calculateNextDelay() time.Duration {
-	if c.retryBackoff == nil {
+	if c.retryCfg.retryBackoff == nil {
 		return 0
 	}
 
-	delay := c.retryBackoff.Next(c.currentAttempt)
-	if c.jitter {
+	delay := c.retryCfg.retryBackoff.Next(c.retryCfg.currentAttempt)
+	if c.retryCfg.jitter {
 		f := 0.9 + rand.Float64()*0.2
 		delay = time.Duration(float64(delay) * f)
 	}
@@ -111,7 +107,7 @@ func (c *clusterTask) prepareForRetry() {
 
 	c.ctx, c.cancel = context.WithCancel(c.cluster.ctx)
 
-	c.currentAttempt++
+	c.retryCfg.currentAttempt++
 }
 
 func (c *clusterTask) runClusterTask(workerCtx context.Context, report task.Reporter) {
@@ -121,8 +117,6 @@ func (c *clusterTask) runClusterTask(workerCtx context.Context, report task.Repo
 		c.finish(task.StatusCancelled, c.ctx.Err(), report, nil)
 		return
 	}
-
-	c.status.Store(int32(task.StatusRunning))
 
 	var once sync.Once
 	finalReport := func(status task.TaskStatus, err error, val any) {
@@ -188,7 +182,7 @@ func (c *clusterTask) runClusterTask(workerCtx context.Context, report task.Repo
 			return
 		}
 
-		if c.retryMode == Immediate && c.shouldRetry(currentRes.err) {
+		if c.retryCfg.retryMode == Immediate && c.shouldRetry(currentRes.err) {
 			delay := c.calculateNextDelay()
 
 			c.prepareForRetry()

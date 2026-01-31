@@ -119,6 +119,11 @@ func (c *cluster) AddTask(t task.TaskInterface) ClusterTaskBuilderInterface {
 		cluster:      c,
 		retryMode:    Requeue,
 		retryBackoff: FixedBackoff{Delay: 1 * time.Second},
+		maxRetries:   0,
+		priority:     0,
+		jitter:       false,
+		isCacheable:  false,
+		startTime:    time.Now(),
 	}
 }
 
@@ -164,7 +169,7 @@ func (c *cluster) setResult(id string, val any, err error) {
 		return
 	}
 
-	if err != nil && info.ct.retryMode == Requeue && info.ct.shouldRetry(err) {
+	if err != nil && info.ct.retryCfg.retryMode == Requeue && info.ct.shouldRetry(err) {
 		delay := info.ct.calculateNextDelay()
 		info.ct.prepareForRetry()
 		info.ct.startTime = time.Now().Add(delay)

@@ -133,29 +133,29 @@ func (c *clusterTaskBuilder) Submit() (string, error) {
 	}
 
 	info, exists := c.cluster.subscribers[id]
-
 	if exists {
 		if info.ct != nil {
 			return "", fmt.Errorf("task with id %s is already running", id)
 		}
-		info.result = nil
-	}
-
-	ct := newClusterTask(c.cluster.ctx, c.it, c.startTime, c.timeout, c.priority)
-	ct.onCompleteFn = c.onCompleteFn
-	ct.onFailureFn = c.onFailureFn
-
-	ct.maxRetries = c.maxRetries
-	ct.retryBackoff = c.retryBackoff
-	ct.jitter = c.jitter
-	ct.retryIf = c.retryIf
-	ct.retryMode = c.retryMode
-	ct.cluster = c.cluster
-
-	if !exists {
-		info = &subscribeInfo{waiters: make([]chan Result, 0)}
+	} else {
+		info = &subscribeInfo{
+			waiters: make([]chan Result, 0),
+		}
 		c.cluster.subscribers[id] = info
 	}
+
+	ct := newClusterTask(c.cluster, c.it, c.startTime, c.timeout, c.priority)
+
+	ct.retryCfg = retryConfig{
+		maxRetries:   c.maxRetries,
+		retryBackoff: c.retryBackoff,
+		jitter:       c.jitter,
+		retryIf:      c.retryIf,
+		retryMode:    c.retryMode,
+	}
+
+	ct.onCompleteFn = c.onCompleteFn
+	ct.onFailureFn = c.onFailureFn
 
 	info.ct = ct
 	info.isCacheable = c.isCacheable
