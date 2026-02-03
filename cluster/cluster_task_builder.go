@@ -13,17 +13,32 @@ type ClusterTaskBuilderInterface interface {
 	// WithStartTime schedules the task to run at a specific time.
 	// If the time is in the past or time.Now(), the task will be executed as soon as a worker is available.
 	WithStartTime(st time.Time) ClusterTaskBuilderInterface
+
 	// WithTimeout sets a maximum execution time for the task.
 	// If the task exceeds this duration, its ctx will be cancelled, and the task will be marked as timed out.
 	WithTimeout(tm time.Duration) ClusterTaskBuilderInterface
+
 	// WithPriority sets the task's priority.
 	// Higher values (or lower, depending on your heap logic—usually higher) will move the task to the front of the queue.
 	WithPriority(p int) ClusterTaskBuilderInterface
 
+	// WithRetry sets the maximum number of times a task will be retried upon failure.
+	// Default is 0 (no retries).
 	WithRetry(r int) ClusterTaskBuilderInterface
+
+	// WithBackoffStrategy defines the delay logic between retry attempts.
+	// Default is FixedBackoff with 0s delay if not specified.
 	WithBackoffStrategy(strategy RetryBackoffStrategy) ClusterTaskBuilderInterface
+
+	// WithJitter adds a small random variation to the retry delay to prevent thundering herd problems.
 	WithJitter() ClusterTaskBuilderInterface
+
+	// RetryIf registers a predicate function to decide whether a retry should be attempted based on the error.
+	// If the function returns true, the task is retried; otherwise, it fails immediately.
 	RetryIf(func(err error) bool) ClusterTaskBuilderInterface
+
+	// WithRetryMode defines where the retry delay happens.
+	// Default is Requeue (returns the task to the queue).
 	WithRetryMode(mode RetryMode) ClusterTaskBuilderInterface
 
 	// IsCacheable determines if the task result should be stored in memory after completion.
@@ -31,14 +46,17 @@ type ClusterTaskBuilderInterface interface {
 	// After this period, the result is purged from memory to prevent leaks.
 	// (Note: This duration may become configurable in future releases).
 	IsCacheable(v bool) ClusterTaskBuilderInterface
+
 	// OnComplete registers a callback that will be invoked once the task finishes its execution,
 	// regardless of whether it succeeded, failed, or was cancelled.
 	// The callback receives the task's unique ID, the resulting value, and any error encountered.
 	OnComplete(fn func(id string, val any, err error)) ClusterTaskBuilderInterface
+
 	// OnFailure registers a callback that will be invoked only if the task ends with an error,
 	// a panic, or is cancelled.
 	// The callback receives the task's unique ID and the error that caused the failure.
 	OnFailure(fn func(id string, err error)) ClusterTaskBuilderInterface
+
 	// Submit - the final method in the chain.
 	// It validates the task, generates an ID (if empty), and pushes the task into the scheduler.
 	// Returns an error if a task with the same ID is already running or managed by the cluster.

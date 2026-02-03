@@ -13,9 +13,9 @@ func main() {
 	// Cluster context
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	
+
 	// Creating cluster
-	myCluster := cluster.NewCluster(2, ctx)
+	myCluster := cluster.NewCluster(4, ctx)
 	// You can run cluster now or later
 	myCluster.Run()
 

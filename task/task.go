@@ -11,12 +11,20 @@ type Reporter func(id string, val any, err error)
 type TaskInterface interface {
 	// ID returns the task's unique identifier.
 	ID() string
+
 	// SetID Updates the task ID manually.
 	// Do not call SetID after the task has been added to a cluster.
 	// Doing so will break the internal mapping and the task may become unmanageable.
 	SetID(id string)
+
 	// Fn returns the underlying function to be executed.
 	Fn() TaskFunc
+
+	// Clone creates a deep copy of the task.
+	// The cluster calls this automatically during AddTask to ensure
+	// that each execution has its own independent state and to
+	// prevent side effects from external modifications.
+	Clone() TaskInterface
 }
 
 // TaskFunc defines the signature of the function containing the job logic.
@@ -51,4 +59,11 @@ func (t *task) SetID(id string) {
 
 func (t *task) Fn() TaskFunc {
 	return t.fn
+}
+
+func (t *task) Clone() TaskInterface {
+	return &task{
+		id: t.id,
+		fn: t.fn,
+	}
 }

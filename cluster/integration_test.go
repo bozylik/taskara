@@ -17,7 +17,6 @@ func TestCluster_FullIntegrationFlow(t *testing.T) {
 	myCluster := cluster.NewCluster(2, ctx)
 	myCluster.Run()
 
-	// 2. Определение задачи
 	job1 := func(id string, ctx context.Context, cancelled <-chan struct{}, report task.Reporter) {
 		select {
 		case <-cancelled:
@@ -38,7 +37,7 @@ func TestCluster_FullIntegrationFlow(t *testing.T) {
 		WithStartTime(startTime).
 		WithTimeout(5 * time.Second).
 		OnComplete(func(id string, val any, err error) {
-			fmt.Println("OnComplete task-1")
+
 		}).
 		OnFailure(func(id string, err error) {
 			fmt.Println("OnFailure task-1")
@@ -266,6 +265,171 @@ func TestCluster_TaskCluster_EdgeCases(t *testing.T) {
 	})
 }
 
+func TestCluster_TaskCluster_Retry(t *testing.T) {
+	myCluster := cluster.NewCluster(2, context.Background())
+	myCluster.Run()
+
+	invalidError := fmt.Errorf("invalid error")
+	job1 := func(id string, ctx context.Context, cancelled <-chan struct{}, report task.Reporter) {
+		report(id, "Data from task-1", invalidError)
+	}
+
+	task1 := task.NewTask("", job1)
+	_, _ = myCluster.AddTask(task1).
+		WithRetry(5).
+		WithJitter().
+		RetryIf(func(err error) bool {
+			return err.Error() == invalidError.Error()
+		}).
+		Submit()
+
+	_, _ = myCluster.AddTask(task1).
+		WithRetry(1).
+		WithRetryMode(cluster.Immediate).
+		WithBackoffStrategy(cluster.NewFixedBackoff(1 * time.Second)).
+		Submit()
+
+	_, _ = myCluster.AddTask(task1).
+		WithRetry(1).
+		WithRetryMode(cluster.Requeue).
+		WithBackoffStrategy(cluster.NewLinearBackoff(1*time.Second, 1*time.Second)).
+		Submit()
+
+	_, _ = myCluster.AddTask(task1).
+		WithRetry(3).
+		WithRetryMode(cluster.Requeue).
+		WithBackoffStrategy(cluster.NewExponentialBackoff(100*time.Millisecond, 2.0, 500*time.Millisecond)).
+		Submit()
+
+	_ = cluster.NewExponentialBackoff(1*time.Second, 0.5, 500*time.Millisecond)
+
+	time.Sleep(5 * time.Second)
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && s[:len(substr)] == substr || (len(s) > len(substr) && s[1:] == substr)
+}
+
+func TestCluster_Scheduler_Coverage_CtxDoneDuringWait(t *testing.T) {
+	ctx := context.Background()
+
+	myCluster := cluster.NewCluster(1, ctx)
+	myCluster.Run()
+
+	futureTime := time.Now().Add(1 * time.Hour)
+
+	job := func(id string, ctx context.Context, cancelled <-chan struct{}, report task.Reporter) {
+		report(id, "done", nil)
+	}
+
+	_, err := myCluster.AddTask(task.NewTask("future-task", job)).
+		WithStartTime(futureTime).
+		Submit()
+
+	if err != nil {
+		t.Fatalf("Failed to submit task: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	myCluster.Cancel()
+
+	time.Sleep(50 * time.Millisecond)
+
+	t.Log("Scheduler successfully exited from wait select via ctx.Done")
+}
+
+func TestImmediateRetry_CancelTask(t *testing.T) {
+	myCluster := cluster.NewCluster(1, context.Background())
+	myCluster.Run()
+
+	job := func(id string, ctx context.Context, cancel <-chan struct{}, report task.Reporter) {
+		report(id, nil, fmt.Errorf("retry me"))
+	}
+
+	id, _ := myCluster.AddTask(task.NewTask("task-1", job)).
+		WithRetry(1).
+		WithRetryMode(cluster.Immediate).
+		WithBackoffStrategy(cluster.FixedBackoff{Delay: 10 * time.Second}).
+		Submit()
+
+	time.Sleep(500 * time.Millisecond)
+
+	myCluster.CancelTask(id)
+	time.Sleep(500 * time.Millisecond)
+}
+
+func TestCluster_TaskCluster_TestImmediateRetry_CancelCluster(t *testing.T) {
+	myCluster := cluster.NewCluster(1, context.Background())
+	myCluster.Run()
+
+	job := func(id string, ctx context.Context, cancel <-chan struct{}, report task.Reporter) {
+		report(id, nil, fmt.Errorf("retry me"))
+	}
+
+	_, _ = myCluster.AddTask(task.NewTask("task-1", job)).
+		WithRetry(1).
+		WithRetryMode(cluster.Immediate).
+		WithBackoffStrategy(cluster.FixedBackoff{Delay: 10 * time.Second}).
+		OnFailure(func(id string, err error) {}).
+		Submit()
+
+	time.Sleep(500 * time.Millisecond)
+
+	myCluster.Cancel()
+	time.Sleep(500 * time.Millisecond)
+}
+
+func TestCluster_TaskCluster_TestRetry_fnExited(t *testing.T) {
+	myCluster := cluster.NewCluster(1, context.Background())
+	myCluster.Run()
+
+	job := func(id string, ctx context.Context, cancel <-chan struct{}, report task.Reporter) {
+	}
+
+	_, _ = myCluster.AddTask(task.NewTask("task-1", job)).
+		WithRetry(1).
+		WithRetryMode(cluster.Immediate).
+		WithBackoffStrategy(cluster.FixedBackoff{Delay: 10 * time.Second}).
+		Submit()
+
+	time.Sleep(500 * time.Millisecond)
+}
+
+func TestCluster_TaskCluster_TestRetry_CancelTask(t *testing.T) {
+	myCluster := cluster.NewCluster(1, context.Background())
+	myCluster.Run()
+
+	job := func(id string, ctx context.Context, cancel <-chan struct{}, report task.Reporter) {
+		time.Sleep(10 * time.Second)
+		report(id, nil, fmt.Errorf("error"))
+	}
+
+	_, _ = myCluster.AddTask(task.NewTask("task-1", job)).
+		WithRetry(1).
+		WithRetryMode(cluster.Immediate).
+		WithBackoffStrategy(cluster.FixedBackoff{Delay: 10 * time.Second}).
+		Submit()
+
+	time.Sleep(1000 * time.Millisecond)
+	myCluster.CancelTask("task-1")
+	time.Sleep(500 * time.Millisecond)
+}
+
+func TestCluster_TaskCluster_TestImmediateRetry_TimeoutDuringWait(t *testing.T) {
+	myCluster := cluster.NewCluster(1, context.Background())
+	myCluster.Run()
+
+	job := func(id string, ctx context.Context, cancel <-chan struct{}, report task.Reporter) {
+		report(id, nil, fmt.Errorf("trigger retry"))
+	}
+
+	_, _ = myCluster.AddTask(task.NewTask("timeout-task", job)).
+		WithTimeout(1 * time.Second).
+		WithRetry(1).
+		WithRetryMode(cluster.Immediate).
+		WithBackoffStrategy(cluster.FixedBackoff{Delay: 5 * time.Second}).
+		Submit()
+
+	time.Sleep(1500 * time.Millisecond)
 }

@@ -15,6 +15,7 @@ import (
 type Result struct {
 	// Data from the task.
 	Result any
+	
 	// Error from the task, timeout, or panic.
 	Err error
 }
@@ -53,6 +54,7 @@ func newClusterTask(c *cluster, t task.TaskInterface, st time.Time, to time.Dura
 		startTime: st,
 		timeout:   to,
 		Priority:  p,
+		once:      sync.Once{},
 	}
 }
 
@@ -100,13 +102,8 @@ func (c *clusterTask) calculateNextDelay() time.Duration {
 }
 
 func (c *clusterTask) prepareForRetry() {
-	c.once = sync.Once{}
-	c.done = make(chan struct{})
-
 	c.status.Store(int32(task.StatusWaiting))
-
 	c.ctx, c.cancel = context.WithCancel(c.cluster.ctx)
-
 	c.retryCfg.currentAttempt++
 }
 
@@ -123,6 +120,14 @@ func (c *clusterTask) runClusterTask(workerCtx context.Context, report task.Repo
 		once.Do(func() {
 			c.finish(status, err, report, val)
 		})
+	}
+
+	handleContextDone := func() {
+		if c.ctx.Err() != nil {
+			finalReport(task.StatusCancelled, c.ctx.Err(), nil)
+		} else {
+			finalReport(task.StatusCancelled, workerCtx.Err(), nil)
+		}
 	}
 
 	defer func() {
@@ -165,15 +170,18 @@ func (c *clusterTask) runClusterTask(workerCtx context.Context, report task.Repo
 		select {
 		case currentRes = <-resCh:
 			hasResult = true
+
 		case <-fnExited:
+			if c.ctx.Err() != nil || workerCtx.Err() != nil {
+				handleContextDone()
+				return
+			}
 			if !hasResult {
 				currentRes = attemptResult{val: nil, err: nil}
 			}
-		case <-c.ctx.Done():
-			finalReport(task.StatusCancelled, c.ctx.Err(), nil)
-			return
+
 		case <-workerCtx.Done():
-			finalReport(task.StatusCancelled, workerCtx.Err(), nil)
+			handleContextDone()
 			return
 		}
 
@@ -183,20 +191,37 @@ func (c *clusterTask) runClusterTask(workerCtx context.Context, report task.Repo
 		}
 
 		if c.retryCfg.retryMode == Immediate && c.shouldRetry(currentRes.err) {
+			c.prepareForRetry()
 			delay := c.calculateNextDelay()
 
-			c.prepareForRetry()
+			timer := time.NewTimer(delay)
 
 			select {
-			case <-time.After(delay):
+			case <-timer.C:
 				continue
-			case <-c.ctx.Done():
-				finalReport(task.StatusCancelled, c.ctx.Err(), nil)
-				return
+
 			case <-workerCtx.Done():
-				finalReport(task.StatusCancelled, workerCtx.Err(), nil)
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+
+				if c.ctx.Err() != nil {
+					finalReport(task.StatusCancelled, c.ctx.Err(), nil)
+				} else {
+					finalReport(task.StatusCancelled, workerCtx.Err(), nil)
+				}
 				return
 			}
+		}
+
+		if c.retryCfg.retryMode == Requeue && c.shouldRetry(currentRes.err) {
+			if report != nil {
+				report(c.getID(), currentRes.val, currentRes.err)
+			}
+			return
 		}
 
 		status := task.StatusError

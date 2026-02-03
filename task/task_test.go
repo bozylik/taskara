@@ -31,4 +31,19 @@ func TestTask(t *testing.T) {
 			t.Errorf("expected updated ID %s, got %s", newID, tsk.ID())
 		}
 	})
+
+	t.Run("Clone", func(t *testing.T) {
+		id := "test-id"
+		original := NewTask(id, testFn)
+		cloned := original.Clone()
+
+		if cloned.ID() != original.ID() {
+			t.Errorf("expected ID %s, got %s", original.ID(), cloned.ID())
+		}
+
+		// Проверка, что это разные объекты в памяти
+		if cloned == original {
+			t.Error("Clone returned the same pointer, expected a new instance")
+		}
+	})
 }

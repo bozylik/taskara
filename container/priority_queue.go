@@ -4,6 +4,10 @@ import (
 	"time"
 )
 
+// Item represents an entity stored within the priority queue.
+// NOTE: This is a specific implementation of a priority queue for the task cluster.
+// It is intended for internal use within this project only.
+// Do not use this in your own projects as it is not a general-purpose library.
 type Item struct {
 	Value    any
 	Priority int
