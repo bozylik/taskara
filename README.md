@@ -175,7 +175,7 @@ These constants define how the worker pool handles the delay between retries.
 
 >**installation**<br>
 
-`go get github.com/bozylik/taskara@v0.0.2-alpha`
+`go get github.com/bozylik/taskara@v0.0.3-alpha`
 
 Usage:
 ```go
