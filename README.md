@@ -1,4 +1,9 @@
 # taskara
+[![Go Report Card](https://goreportcard.com/badge/github.com/bozylik/taskara)](https://goreportcard.com/report/github.com/bozylik/taskara)
+[![Go Reference](https://pkg.go.dev/badge/github.com/bozylik/taskara.svg)](https://pkg.go.dev/github.com/bozylik/taskara)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![GitHub tag (latest by date)](https://img.shields.io/github/v/tag/bozylik/taskara?color=blue&label=version)](https://github.com/bozylik/taskara/tags)
+[![Go Coverage](https://img.shields.io/badge/coverage-96%25-brightgreen)](https://github.com/bozylik/taskara)
 
 ### lightweight task scheduler with priority and worker pool
 
