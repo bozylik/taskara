@@ -13,8 +13,6 @@ type TaskInterface interface {
 	ID() string
 
 	// SetID Updates the task ID manually.
-	// Do not call SetID after the task has been added to a cluster.
-	// Doing so will break the internal mapping and the task may become unmanageable.
 	SetID(id string)
 
 	// Fn returns the underlying function to be executed.
