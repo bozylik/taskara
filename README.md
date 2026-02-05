@@ -1,9 +1,9 @@
 # taskara
 [![Go Report Card](https://goreportcard.com/badge/github.com/bozylik/taskara)](https://goreportcard.com/report/github.com/bozylik/taskara)
+[![Go Coverage](https://img.shields.io/badge/coverage-96%25-brightgreen)](https://github.com/bozylik/taskara)
+[![GitHub tag (latest by date)](https://img.shields.io/github/v/tag/bozylik/taskara?color=blue&label=version)](https://github.com/bozylik/taskara/tags)
 [![Go Reference](https://pkg.go.dev/badge/github.com/bozylik/taskara.svg)](https://pkg.go.dev/github.com/bozylik/taskara)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![GitHub tag (latest by date)](https://img.shields.io/github/v/tag/bozylik/taskara?color=blue&label=version)](https://github.com/bozylik/taskara/tags)
-[![Go Coverage](https://img.shields.io/badge/coverage-96%25-brightgreen)](https://github.com/bozylik/taskara)
 
 ### lightweight task scheduler with priority and worker pool
 
@@ -13,16 +13,14 @@ taskara is a simple and fast library for managing tasks in go. it allows you to 
 
 > [!IMPORTANT]
 > ## alpha-build
-> this is an early alpha version of the project. it does not include detailed instructions or many examples yet.<br>
+> this is an alpha version of the project.<br>
 > **status:** under active development.<br>
->**future:** we plan to add more features, better documentation, and complex examples soon.<br>
->we do not guarantee backward compatibility of various releases until the first stable version is available.
 
 ---
 
 ## navigation
 * [features](#features)
-* [architecture](#architecture)
+* [architecture & resource usage](#architecture)
 * [methods and functions](#methods-and-functions)
 * [core concepts & usage](#core-concepts--usage)
 * [examples](#examples)
@@ -38,6 +36,8 @@ taskara is a simple and fast library for managing tasks in go. it allows you to 
 * **individual control:** cancel a specific task by its id without stopping others.
 * **easy integration:** get results through go channels.
 * **panic recovery:** automatically catches panics inside tasks, reporting them as errors without crashing the worker pool.
+* **advanced retries:** flexible retry strategies (fixed, linear, or exponential backoff) to handle transient failures.
+* **lifecycle callbacks:** register `OnComplete` and `OnFailure` hooks to react to task results or errors instantly.
 
 ---
 
@@ -47,6 +47,14 @@ the system consists of three main parts:
 1. **scheduler:** manages the waiting and ready queues using a priority heap.
 2. **executor:** runs a fixed pool of workers that process tasks.
 3. **cluster:** provides a simple interface to submit and manage tasks.
+
+### resource usage
+to ensure isolation and robust error handling, taskara uses a supervisor-worker pattern. for every worker in the cluster, there are two active goroutines:
+* **the worker:** manages the task lifecycle and waits for new jobs.
+* **the supervisor:** executes the actual `TaskFunc`, handles timeouts, and catches panics.
+
+including the main scheduler, the total number of goroutines is calculated as:
+$2n + 1$ (where $n$ is the number of workers).
 
 ---
 
@@ -66,11 +74,10 @@ These methods are available on a task instance.
 
 `ID() string` - Returns the task's unique identifier.<br>
 `SetID(id string)` - Updates the task ID manually.<br>
-
-> [!CAUTION]
-> Do not call `SetID` after the task has been added to a cluster. Doing so will break the internal mapping and the task may become unmanageable.<br>
-
-`Fn() TaskFunc` - Returns the underlying task function.
+`Fn() TaskFunc` - Returns the underlying task function.<br>
+`Clone() TaskInterface` - Creates a deep copy of the task.<br>
+> [!NOTE]
+> The cluster calls this automatically during `AddTask` to ensure that each execution has its own independent state and to prevent side effects from external modifications.
 
 >**cluster (package functions)**<br>
 
@@ -82,7 +89,7 @@ These methods are available on a task instance.
 > [!NOTE]
 > Tasks will remain in the queue and won't start until Run() is called.
 
-`AddTask(t task.TaskInterface) *clusterTaskBuilder` - The entry point for submitting a task. It returns a builder that allows you to configure scheduling, timeouts, and metadata. You must call `.Submit()` at the end of the chain to queue the task.<br>
+`AddTask(t task.TaskInterface) ClusterTaskBuilderInterface` - The entry point for submitting a task. It returns a builder that allows you to configure scheduling, timeouts, and metadata. You must call `.Submit()` at the end of the chain to queue the task.<br>
 `Subscribe(id string) (<-chan Result, error)`- Returns a channel that receives the task's result (`val` and `err`).<br>
 > [!WARNING]
 > Timing is key: By default, you must subscribe before the task completes. To retrieve results for already finished tasks, the task must be marked as `.IsCacheable(true)` during submission.<br>
@@ -99,13 +106,13 @@ These methods are available on a task instance.
 > [!CAUTION]
 > Use this only when a graceful shutdown is not possible, as it may leave tasks in an incomplete state.
 
->**clusterTaskBuilder (methods)**<br>
+>**ClusterTaskBuilderInterface (methods)**<br>
 
 These methods allow you to configure a task's behavior before adding it to the queue. They support method chaining.
 
-`WithStartTime(st time.Time) *clusterTaskBuilder` - Schedules the task to run at a specific time. If the time is in the past or `time.Now()`, the task will be executed as soon as a worker is available.<br>
-`WithTimeout(tm time.Duration) *clusterTaskBuilder` - Sets a maximum execution time for the task. If the task exceeds this duration, its `ctx` will be cancelled, and the task will be marked as timed out.<br>
-`WithPriority(p int) *clusterTaskBuilder` - Sets the task's priority. Higher values (or lower, depending on your heap logic—usually higher) will move the task to the front of the queue.<br>
+`WithStartTime(st time.Time) ClusterTaskBuilderInterface` - Schedules the task to run at a specific time. If the time is in the past or `time.Now()`, the task will be executed as soon as a worker is available.<br>
+`WithTimeout(tm time.Duration) ClusterTaskBuilderInterface` - Sets a maximum execution time for the task. If the task exceeds this duration, its `ctx` will be cancelled, and the task will be marked as timed out.<br>
+`WithPriority(p int) ClusterTaskBuilderInterface` - Sets the task's priority. Higher values (or lower, depending on your heap logic—usually higher) will move the task to the front of the queue.<br>
 > [!TIP]
 > **How scheduling priority works?**
 >
@@ -113,13 +120,54 @@ These methods allow you to configure a task's behavior before adding it to the q
 > **Priority as a tie-breaker**: If two tasks have the same `StartTime`, the one with the higher priority will be executed first.<br>
 > **Order of submission**: If both `StartTime` and `Priority` are identical, the task that was submitted first (FIFO) will typically take precedence.<br>
 
-`IsCacheable(v bool) *clusterTaskBuilder` - Determines if the task result should be stored in memory after completion.<br>
+`IsCacheable(v bool) ClusterTaskBuilderInterface` - Determines if the task result should be stored in memory after completion.<br>
 > [!TIP]
 > **Retention Policy**: Currently, cached results are stored for 5 minutes after the task completes. After this period, the result is purged from memory to prevent leaks. (Note: This duration may become configurable in future releases).<br>
 
-`Submit() (string, error)` - The final method in the chain. It validates the task, generates an ID (if empty), and pushes the task into the scheduler.
+`WithRetry(r int) ClusterTaskBuilderInterface` - Sets the maximum number of times a task will be retried upon failure. Default is 0 (no retries).<br>
+`WithBackoffStrategy(strategy RetryBackoffStrategy) ClusterTaskBuilderInterface` - Defines the delay logic between retry attempts. Default is `FixedBackoff` with 0s delay if not specified.<br>
+`WithJitter() ClusterTaskBuilderInterface` - Adds a small random variation to the retry delay to prevent thundering herd problems.<br>
+`RetryIf(func(err error) bool) ClusterTaskBuilderInterface` - Registers a predicate function to decide whether a retry should be attempted based on the error. If the function returns true, the task is retried; otherwise, it fails immediately.<br>
+`WithRetryMode(mode RetryMode) ClusterTaskBuilderInterface` - Defines where the retry delay happens. Default is `Requeue` (returns the task to the queue).<br>
+
+`OnComplete(fn func(id string, val any, err error)) ClusterTaskBuilderInterface` - OnComplete registers a callback that will be invoked once the task finishes its execution, regardless of whether it succeeded, failed, or was cancelled.<br>
+`OnFailure(fn func(id string, err error)) ClusterTaskBuilderInterface` - Registers a callback that will be invoked only if the task ends with an error, a panic, or is cancelled.<br>
+
+`Submit() (string, error)` - The final method in the chain. It validates the task, generates an ID (if empty), and pushes the task into the scheduler.<br>
 > [!WARNING]
 > Returns an error if a task with the same ID is already running or managed by the cluster.<br>
+
+> Backoff Strategy (cluster package)
+
+Taskara provides a flexible system for handling delays between retry attempts. You can use the built-in strategies or implement your own by satisfying the `RetryBackoffStrategy` interface.
+
+> RetryBackoffStrategy (interface)
+
+`Next(attempt int) time.Duration` - Calculates the duration to wait before the next attempt, given the current attempt number.<br>
+
+> Built-in Strategies (constructors)
+
+`NewFixedBackoff(delay time.Duration) RetryBackoffStrategy` - Creates a strategy that always returns the same constant delay.<br>
+> [!TIP] 
+> Use this for simple tasks where the recovery time of the external system is predictable.
+
+`NewLinearBackoff(base time.Duration, step time.Duration) RetryBackoffStrategy` - Creates a strategy where the delay increases by a fixed step after each attempt: `Base + (Step * attempt)`.<br>
+`NewExponentialBackoff(base time.Duration, multiplier float64, max time.Duration) RetryBackoffStrategy` - Creates a strategy where the delay grows exponentially: `Base * (Multiplier ^ attempt)`. 
+The factor by which the delay grows (defaults to 2.0 if set below 1.0). An upper bound to ensure the delay doesn't grow indefinitely. <br>
+> [!IMPORTANT] 
+> **Recommended for Network Ops**: This is the best strategy for API calls and microservices to prevent "thundering herd" issues when a remote service is struggling.
+
+> RetryMode (types)
+> 
+These constants define how the worker pool handles the delay between retries.
+
+`Requeue` - Asynchronous Retry. The task is sent back to the scheduler. The current worker is freed immediately to pick up other tasks, and the failed task will only be picked up again after its backoff delay expires.<br>
+> [!TIP]
+> This is the default and most efficient mode for most cases, as it maximizes worker availability.
+
+`Immediate` - Synchronous Retry. The worker stays "locked" to the task. It will sleep for the duration of the backoff delay and then execute the task again.
+> [!CAUTION] 
+> Use this only for critical tasks. If too many tasks use Immediate mode with long delays, you can exhaust your worker pool, leaving no workers available for other tasks.
 
 ---
 
@@ -145,7 +193,7 @@ import (
 | :--- | :--- | :--- |
 | **id** | `string` | The unique identifier of the task |
 | **ctx** | `context.Context` | General context. Triggers on **manual cancel**, **timeout**, and **cluster shutdown** |
-| **cancelled** | `<-chan struct{}` | Special channel. Triggers **only on manual user cancellation** via `CancelTask()` |
+| **cancelled** | `<-chan struct{}` | Special channel. Triggers **on manual user cancellation** via `CancelTask()` and **cluster shutdown** |
 | **report** | `Reporter` | Callback function to send results and errors back to the cluster |
 
 `type Reporter func(id string, val any, err error)` - reporter is a callback used to send results back to the cluster.
