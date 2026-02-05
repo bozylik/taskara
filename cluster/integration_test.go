@@ -10,6 +10,10 @@ import (
 	"time"
 )
 
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && s[:len(substr)] == substr || (len(s) > len(substr) && s[1:] == substr)
+}
+
 func TestCluster_FullIntegrationFlow(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -306,10 +310,6 @@ func TestCluster_TaskCluster_Retry(t *testing.T) {
 	time.Sleep(5 * time.Second)
 }
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && s[:len(substr)] == substr || (len(s) > len(substr) && s[1:] == substr)
-}
-
 func TestCluster_Scheduler_Coverage_CtxDoneDuringWait(t *testing.T) {
 	ctx := context.Background()
 
@@ -339,7 +339,7 @@ func TestCluster_Scheduler_Coverage_CtxDoneDuringWait(t *testing.T) {
 	t.Log("Scheduler successfully exited from wait select via ctx.Done")
 }
 
-func TestImmediateRetry_CancelTask(t *testing.T) {
+func TestCluster_TaskCluster_TestImmediateRetry_CancelTask(t *testing.T) {
 	myCluster := cluster.NewCluster(1, context.Background())
 	myCluster.Run()
 
