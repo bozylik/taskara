@@ -28,7 +28,7 @@ type ClusterInterface interface {
 	// Cancel - immediate shutdown. Instantly kills all workers and cancels all active task contexts.
 	// Use this only when a graceful shutdown is not possible, as it may leave tasks in an incomplete state.
 	Cancel()
-	
+
 	// CancelTask targets and cancels a specific task by its ID.
 	// This triggers the cancelled channel inside the TaskFunc and closes the task's context.
 	CancelTask(id string)
@@ -129,7 +129,6 @@ func (c *cluster) AddTask(t task.TaskInterface) ClusterTaskBuilderInterface {
 		maxRetries:   0,
 		priority:     0,
 		jitter:       false,
-		isCacheable:  false,
 		startTime:    time.Now(),
 	}
 }
@@ -178,7 +177,8 @@ func (c *cluster) setResult(id string, val any, err error) {
 
 	if err != nil && info.ct.retryCfg.retryMode == Requeue && info.ct.shouldRetry(err) {
 		delay := info.ct.calculateNextDelay()
-		info.ct.prepareForRetry()
+		info.ct.prepareForRetryRequeue()
+
 		info.ct.startTime = time.Now().Add(delay)
 		c.exec.sch.submitInternal(info.ct)
 
@@ -186,29 +186,64 @@ func (c *cluster) setResult(id string, val any, err error) {
 		return
 	}
 
+	currentTask := info.ct
 	res := Result{Result: val, Err: err}
 	info.result = &res
 
+	isTaskRepeating := currentTask != nil && (currentTask.repeatCfg.repeatInterval > 0 || currentTask.repeatCfg.repeatCount > 0)
+
 	for _, ch := range info.waiters {
-		ch <- res
-		close(ch)
+		select {
+		case ch <- res:
+		default:
+		}
+
+		if !isTaskRepeating {
+			close(ch)
+		}
 	}
-	info.waiters = nil
 
-	info.ct = nil
+	if isTaskRepeating {
+		info.waiters = nil
+	}
 
-	if info.isCacheable {
-		oldInfo := info
-		time.AfterFunc(5*time.Minute, func() {
-			c.mu.Lock()
-			defer c.mu.Unlock()
-			if cur, exists := c.subscribers[id]; exists && cur == oldInfo {
-				delete(c.subscribers, id)
-			}
-		})
+	var isRepeating bool
+	if currentTask != nil {
+		cfg := currentTask.repeatCfg
+
+		countOk := cfg.repeatCount > 0 || (cfg.repeatCount == 0 && cfg.repeatInterval > 0)
+		timeOk := cfg.repeatUntil.IsZero() || time.Now().Before(cfg.repeatUntil)
+
+		if countOk && timeOk {
+			newCt := currentTask.cloneForNextRun()
+			info.ct = newCt
+			c.exec.sch.submitInternal(newCt)
+			isRepeating = true
+		}
+	}
+
+	if !isRepeating {
+		info.ct = nil
+
+		if info.cacheTTL == 0 {
+			delete(c.subscribers, id)
+			c.mu.Unlock()
+			return
+		}
+
+		if info.cacheTTL > 0 {
+			oldInfo := info
+			time.AfterFunc(info.cacheTTL, func() {
+				c.mu.Lock()
+				defer c.mu.Unlock()
+				if cur, exists := c.subscribers[id]; exists && cur == oldInfo {
+					delete(c.subscribers, id)
+				}
+			})
+		}
+
 		c.mu.Unlock()
 	} else {
-		delete(c.subscribers, id)
 		c.mu.Unlock()
 	}
 }

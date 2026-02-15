@@ -15,7 +15,7 @@ import (
 type Result struct {
 	// Data from the task.
 	Result any
-	
+
 	// Error from the task, timeout, or panic.
 	Err error
 }
@@ -37,7 +37,8 @@ type clusterTask struct {
 	startTime time.Time
 	timeout   time.Duration
 
-	retryCfg retryConfig
+	retryCfg  retryConfig
+	repeatCfg repeatConfig
 
 	Priority int
 	Index    int
@@ -101,9 +102,29 @@ func (c *clusterTask) calculateNextDelay() time.Duration {
 	return delay
 }
 
-func (c *clusterTask) prepareForRetry() {
+func (c *clusterTask) cloneForNextRun() *clusterTask {
+	newT := newClusterTask(c.cluster, c.task, time.Now().Add(c.repeatCfg.repeatInterval), c.timeout, c.Priority)
+
+	newT.retryCfg = c.retryCfg
+	newT.onCompleteFn = c.onCompleteFn
+	newT.onFailureFn = c.onFailureFn
+
+	newT.repeatCfg = c.repeatCfg
+	if newT.repeatCfg.repeatCount > 0 {
+		newT.repeatCfg.repeatCount--
+	}
+
+	return newT
+}
+
+func (c *clusterTask) prepareForRetryRequeue() {
 	c.status.Store(int32(task.StatusWaiting))
 	c.ctx, c.cancel = context.WithCancel(c.cluster.ctx)
+	c.retryCfg.currentAttempt++
+}
+
+func (c *clusterTask) prepareForRetryImmediate() {
+	c.status.Store(int32(task.StatusWaiting))
 	c.retryCfg.currentAttempt++
 }
 
@@ -191,7 +212,8 @@ func (c *clusterTask) runClusterTask(workerCtx context.Context, report task.Repo
 		}
 
 		if c.retryCfg.retryMode == Immediate && c.shouldRetry(currentRes.err) {
-			c.prepareForRetry()
+			c.prepareForRetryImmediate()
+
 			delay := c.calculateNextDelay()
 
 			timer := time.NewTimer(delay)

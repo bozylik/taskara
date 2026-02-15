@@ -41,11 +41,11 @@ type ClusterTaskBuilderInterface interface {
 	// Default is Requeue (returns the task to the queue).
 	WithRetryMode(mode RetryMode) ClusterTaskBuilderInterface
 
-	// IsCacheable determines if the task result should be stored in memory after completion.
-	// Currently, cached results are stored for 5 minutes after the task completes.
-	// After this period, the result is purged from memory to prevent leaks.
-	// (Note: This duration may become configurable in future releases).
-	IsCacheable(v bool) ClusterTaskBuilderInterface
+	WithRepeatInterval(interval time.Duration) ClusterTaskBuilderInterface
+	RepeatUntil(until time.Time) ClusterTaskBuilderInterface
+	WithRepeatCount(n int) ClusterTaskBuilderInterface
+
+	WithCache(ttl time.Duration) ClusterTaskBuilderInterface
 
 	// OnComplete registers a callback that will be invoked once the task finishes its execution,
 	// regardless of whether it succeeded, failed, or was cancelled.
@@ -73,13 +73,17 @@ type clusterTaskBuilder struct {
 	onCompleteFn func(id string, val any, err error)
 	onFailureFn  func(id string, err error)
 
-	isCacheable bool
+	cacheTTL time.Duration
 
 	maxRetries   int
 	retryBackoff RetryBackoffStrategy
 	jitter       bool
 	retryIf      func(err error) bool
 	retryMode    RetryMode
+
+	repeatInterval time.Duration
+	repeatUntil    time.Time
+	repeatCount    int
 
 	priority int
 	index    int
@@ -125,8 +129,23 @@ func (c *clusterTaskBuilder) WithRetryMode(mode RetryMode) ClusterTaskBuilderInt
 	return c
 }
 
-func (c *clusterTaskBuilder) IsCacheable(v bool) ClusterTaskBuilderInterface {
-	c.isCacheable = v
+func (c *clusterTaskBuilder) WithRepeatInterval(interval time.Duration) ClusterTaskBuilderInterface {
+	c.repeatInterval = interval
+	return c
+}
+
+func (c *clusterTaskBuilder) RepeatUntil(until time.Time) ClusterTaskBuilderInterface {
+	c.repeatUntil = until
+	return c
+}
+
+func (c *clusterTaskBuilder) WithRepeatCount(n int) ClusterTaskBuilderInterface {
+	c.repeatCount = n
+	return c
+}
+
+func (c *clusterTaskBuilder) WithCache(ttl time.Duration) ClusterTaskBuilderInterface {
+	c.cacheTTL = ttl
 	return c
 }
 
@@ -175,8 +194,14 @@ func (c *clusterTaskBuilder) Submit() (string, error) {
 	ct.onCompleteFn = c.onCompleteFn
 	ct.onFailureFn = c.onFailureFn
 
+	ct.repeatCfg = repeatConfig{
+		repeatInterval: c.repeatInterval,
+		repeatCount:    c.repeatCount,
+		repeatUntil:    c.repeatUntil,
+	}
+
 	info.ct = ct
-	info.isCacheable = c.isCacheable
+	info.cacheTTL = c.cacheTTL
 	info.result = nil
 
 	c.cluster.exec.sch.submitInternal(ct)

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"github.com/bozylik/taskara/cluster"
 	"github.com/bozylik/taskara/task"
@@ -15,32 +14,18 @@ func main() {
 
 	jobError := fmt.Errorf("job error")
 	job := func(id string, ctx context.Context, cancel <-chan struct{}, report task.Reporter) {
+		//time.Sleep(5 * time.Second)
 		fmt.Println(time.Now(), "- job started")
 		report(id, nil, jobError)
 	}
 
 	taskID, err := myCluster.AddTask(task.NewTask("task-1", job)).
-		WithRetry(3).
-		WithRetryMode(cluster.Immediate).
-		WithTimeout(time.Second * 10).
-		WithBackoffStrategy(cluster.NewFixedBackoff(1 * time.Second)).
-		RetryIf(func(err error) bool {
-			if errors.Is(err, jobError) {
-				return true
-			}
-
-			return false
-		}).
-		OnComplete(func(id string, val any, err error) {
-			fmt.Println("OnComplete:", id)
-		}).
-		OnFailure(func(id string, err error) {
-			fmt.Println("OnFailure:", id)
-		}).
+		WithRepeatInterval(10 * time.Second).
+		RepeatUntil(time.Now().Add(2 * time.Second)).
+		//WithRepeatCount(1).
 		Submit()
 
 	if err != nil {
-		// panic for example
 		panic(err)
 	}
 
@@ -52,5 +37,5 @@ func main() {
 
 	fmt.Println(<-res)
 
-	time.Sleep(1 * time.Second)
+	time.Sleep(105 * time.Second)
 }

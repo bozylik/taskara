@@ -1,5 +1,7 @@
 package cluster
 
+import "time"
+
 // RetryMode defines how the task should be retried after a failure.
 type RetryMode int
 
@@ -14,4 +16,10 @@ const (
 	// executing the task again. Use this for high-priority tasks where
 	// keeping the execution slot is more important than worker availability.
 	Immediate
+)
+
+const (
+	NoCache       time.Duration = 0
+	InfiniteCache time.Duration = -1
+	DefaultCache  time.Duration = 5 * time.Minute
 )
